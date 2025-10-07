@@ -1,0 +1,30 @@
+    {
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Arcanoid Prototype",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-std=c++17",
+        "-IC:/Users/USER/Downloads/glad/include",
+        "-LC:/Users/USER/Downloads/glad/lib",
+        "src/main.cpp",
+        "src/Game.cpp",
+        "src/Renderer.cpp",
+        "src/Ball.cpp",
+        "-o",
+        "bin/ArcanoidPrototype.exe",
+        "-lglfw3",
+        "-lopengl32",
+        "-lgdi32"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"],
+      "detail": "Builds the Arcanoid prototype using OpenGL and GLAD"
+    }
+  ]
+}
