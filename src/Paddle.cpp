@@ -24,6 +24,7 @@ void Paddle::Draw(Renderer& renderer) {
     glUseProgram(renderer.GetShaderProgram());
     int colorLoc = glGetUniformLocation(renderer.GetShaderProgram(), "color");
     glUniform4f(colorLoc, 0.2f, 0.8f, 1.0f, 1.0f);
+    renderer.UseTexture(false);
     renderer.SetOffset(x, y);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
     glDeleteVertexArrays(1, &vao);
@@ -34,5 +35,6 @@ float Paddle::GetX() const { return x; }
 float Paddle::GetY() const { return y; }
 float Paddle::GetW() const { return w; }
 float Paddle::GetH() const { return h; }
-
-
+void Paddle::SetW(float newW) { w = newW; }
+float Paddle::GetSpeed() const { return speed; }
+void Paddle::SetSpeed(float s) { speed = s; }

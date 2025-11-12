@@ -2,12 +2,12 @@ CXX = g++
 CC = gcc
 CXXFLAGS = -std=c++17 -Wall -Iinclude -DGLFW_INCLUDE_NONE
 CFLAGS = -std=c11 -Wall -Iinclude -DGLFW_INCLUDE_NONE
-LDFLAGS = -Llib -lglfw3 -lopengl32 -lgdi32
+LDFLAGS = -Llib -lglfw3 -lopengl32 -lgdi32 -lgdiplus
 
 SRC_CPP = src/Ball.cpp src/Game.cpp src/Renderer.cpp src/Paddle.cpp src/main.cpp
 SRC_C = src/glad.c
 OBJ = $(SRC_CPP:.cpp=.o) $(SRC_C:.c=.o)
-TARGET = ArcanoidPrototype.exe
+TARGET = ArcanoidTheGame.exe
 
 all: $(TARGET)
 

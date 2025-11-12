@@ -10,6 +10,9 @@ public:
     float GetY() const;
     float GetW() const;
     float GetH() const;
+    void SetW(float newW);
+    float GetSpeed() const;
+    void SetSpeed(float s);
 private:
     float x, y, w, h;
     float speed;
