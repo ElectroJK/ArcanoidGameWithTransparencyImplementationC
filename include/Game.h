@@ -57,6 +57,13 @@ private:
     struct Fx { float x, y; int frame; double nextAt; bool alive; };
     std::vector<Fx> brickFx;
 
+    struct PowerUp { float x, y; float vy; int type; bool alive; };
+    std::vector<PowerUp> powerUps;
+    std::vector<Ball> extraBalls;
+    double tripleUntil;
+    double enlargeUntil;
+    float basePaddleW;
+
     void ProcessInput();
     void InitLevel();
     void InitLevelAlien();

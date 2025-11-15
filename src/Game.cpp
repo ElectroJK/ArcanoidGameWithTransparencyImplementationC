@@ -3,6 +3,56 @@
 #include "Game.h"
 #include <cmath>
 #include <algorithm>
+#include <vector>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <memory>
+#include <windows.h>
+#include <gdiplus.h>
+
+struct M4 { float m[16]; };
+static M4 I(){ M4 r={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1}; return r; }
+static M4 Mul(const M4&a,const M4&b){ M4 r={0}; for(int i=0;i<4;i++) for(int j=0;j<4;j++){ r.m[i*4+j]=a.m[i*4+0]*b.m[0*4+j]+a.m[i*4+1]*b.m[1*4+j]+a.m[i*4+2]*b.m[2*4+j]+a.m[i*4+3]*b.m[3*4+j]; } return r; }
+static M4 T(float x,float y,float z){ M4 r=I(); r.m[12]=x; r.m[13]=y; r.m[14]=z; return r; }
+static M4 Ry(float a){ float c=std::cos(a), s=std::sin(a); M4 r=I(); r.m[0]=c; r.m[2]=s; r.m[8]=-s; r.m[10]=c; return r; }
+static M4 P(float fovy,float aspect,float zn,float zf){ float f=1.0f/std::tan(fovy*0.5f); M4 r={0}; r.m[0]=f/aspect; r.m[5]=f; r.m[10]=(zf+zn)/(zn-zf); r.m[11]=-1.0f; r.m[14]=(2*zf*zn)/(zn-zf); return r; }
+static unsigned int Compile(unsigned int type,const char*src){ unsigned int s=glCreateShader(type); glShaderSource(s,1,&src,nullptr); glCompileShader(s); return s; }
+static unsigned int Link(unsigned int vs,unsigned int fs){ unsigned int p=glCreateProgram(); glAttachShader(p,vs); glAttachShader(p,fs); glLinkProgram(p); glDeleteShader(vs); glDeleteShader(fs); return p; }
+static unsigned int LoadTexGDI(const char* path){
+    static bool started=false; static ULONG_PTR token; if(!started){ Gdiplus::GdiplusStartupInput si; GdiplusStartup(&token,&si,nullptr); started=true; }
+    wchar_t wpath[MAX_PATH]; MultiByteToWideChar(CP_UTF8,0,path,-1,wpath,MAX_PATH);
+    std::unique_ptr<Gdiplus::Bitmap> bmp{ Gdiplus::Bitmap::FromFile(wpath) };
+    if(!bmp || bmp->GetLastStatus()!=Gdiplus::Ok) return 0;
+    Gdiplus::BitmapData bd; Gdiplus::Rect rect(0,0,bmp->GetWidth(),bmp->GetHeight());
+    bmp->LockBits(&rect,Gdiplus::ImageLockModeRead,PixelFormat32bppARGB,&bd);
+    GLuint tex=0; glGenTextures(1,&tex); glBindTexture(GL_TEXTURE_2D,tex);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,bd.Width,bd.Height,0,GL_BGRA,GL_UNSIGNED_BYTE,bd.Scan0);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    bmp->UnlockBits(&bd);
+    return tex;
+}
+static bool LoadSMF(const char* path, std::vector<float>& pos, std::vector<unsigned int>& idx){ std::ifstream in(path); if(!in) return false; std::string line; std::vector<float> verts; std::vector<unsigned int> faces; verts.reserve(10000); faces.reserve(20000); while(std::getline(in,line)){ if(line.empty()) continue; if(line[0]=='v' && (line.size()==1 || line[1]==' ')){ std::istringstream ss(line.substr(1)); float x,y,z; ss>>x>>y>>z; verts.push_back(x); verts.push_back(y); verts.push_back(z); } else if(line[0]=='f'){ std::istringstream ss(line.substr(1)); unsigned int a,b,c; ss>>a>>b>>c; if(a&&b&&c){ faces.push_back(a-1); faces.push_back(b-1); faces.push_back(c-1); } } }
+ if(verts.empty()||faces.empty()) return false; pos.swap(verts); idx.swap(faces); return true; }
+static void ShowThankWindow(GLFWwindow* returnWindow){ int w=1400,h=1200; glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,3); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,3); glfwWindowHint(GLFW_OPENGL_PROFILE,GLFW_OPENGL_CORE_PROFILE); GLFWwindow* win=glfwCreateWindow(w,h,"Thank You",nullptr,nullptr); if(!win) return; glfwMakeContextCurrent(win); gladLoadGLLoader((GLADloadproc)glfwGetProcAddress); glViewport(0,0,w,h); glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+ const char* v2d = "#version 330 core\nlayout(location=0) in vec2 p; layout(location=1) in vec2 uv; out vec2 t; void main(){ t=uv; gl_Position=vec4(p,0.0,1.0);}";
+ const char* f2d = "#version 330 core\nin vec2 t; out vec4 o; uniform sampler2D tex; void main(){ o = texture(tex,t); }";
+ unsigned int vs2=Compile(GL_VERTEX_SHADER,v2d), fs2=Compile(GL_FRAGMENT_SHADER,f2d); unsigned int prog2=Link(vs2,fs2); int uTex=glGetUniformLocation(prog2,"tex"); unsigned int vao=0,vbo=0; glGenVertexArrays(1,&vao); glGenBuffers(1,&vbo);
+ using namespace Gdiplus; static bool started=false; static ULONG_PTR token; if(!started){ GdiplusStartupInput si; GdiplusStartup(&token,&si,nullptr); started=true; }
+ int tyW=0, tyH=0; GLuint texTY=0; { wchar_t wpath[MAX_PATH]; MultiByteToWideChar(CP_UTF8,0,"src/fun/TY.png",-1,wpath,MAX_PATH); std::unique_ptr<Gdiplus::Bitmap> bmp{ Gdiplus::Bitmap::FromFile(wpath) }; if(bmp && bmp->GetLastStatus()==Gdiplus::Ok){ tyW=bmp->GetWidth(); tyH=bmp->GetHeight(); Gdiplus::BitmapData bd; Gdiplus::Rect rect(0,0,tyW,tyH); bmp->LockBits(&rect,Gdiplus::ImageLockModeRead,PixelFormat32bppARGB,&bd); glGenTextures(1,&texTY); glBindTexture(GL_TEXTURE_2D,texTY); glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,bd.Width,bd.Height,0,GL_BGRA,GL_UNSIGNED_BYTE,bd.Scan0); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE); bmp->UnlockBits(&bd); } }
+ std::vector<GLuint> gifFrames; std::vector<int> gifDelays; int gifW=0,gifH=0; { wchar_t wpath[MAX_PATH]; MultiByteToWideChar(CP_UTF8,0,"src/fun/oia.gif",-1,wpath,MAX_PATH); std::unique_ptr<Gdiplus::Bitmap> bmp{ Gdiplus::Bitmap::FromFile(wpath) }; if(bmp && bmp->GetLastStatus()==Gdiplus::Ok){ UINT count=bmp->GetFrameDimensionsCount(); if(count){ std::vector<GUID> dims(count); bmp->GetFrameDimensionsList(dims.data(),count); UINT frameCount=bmp->GetFrameCount(&dims[0]); gifW=bmp->GetWidth(); gifH=bmp->GetHeight(); Gdiplus::PropertyItem* pDelays=nullptr; UINT size=bmp->GetPropertyItemSize(PropertyTagFrameDelay); std::vector<int> frameDelays(frameCount,100); if(size){ pDelays=(Gdiplus::PropertyItem*)malloc(size); if(bmp->GetPropertyItem(PropertyTagFrameDelay,size,pDelays)==Gdiplus::Ok){ UINT n=pDelays->length/4; for(UINT i=0;i<frameCount && i<n;++i) frameDelays[i]=((LONG*)pDelays->value)[i]*10; } free(pDelays);} for(UINT i=0;i<frameCount;++i){ bmp->SelectActiveFrame(&dims[0],i); Gdiplus::BitmapData bd; Gdiplus::Rect rect(0,0,gifW,gifH); bmp->LockBits(&rect,Gdiplus::ImageLockModeRead,PixelFormat32bppARGB,&bd); GLuint tex=0; glGenTextures(1,&tex); glBindTexture(GL_TEXTURE_2D,tex); glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,bd.Width,bd.Height,0,GL_BGRA,GL_UNSIGNED_BYTE,bd.Scan0); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE); bmp->UnlockBits(&bd); gifFrames.push_back(tex); gifDelays.push_back(frameDelays[i]); } } }
+ int frame=0; double nextAt=0.0; while(!glfwWindowShouldClose(win)){
+ glfwPollEvents(); int fbw, fbh; glfwGetFramebufferSize(win,&fbw,&fbh); glViewport(0,0,fbw,fbh); glClearColor(1.0f,1.0f,1.0f,1.0f); glClear(GL_COLOR_BUFFER_BIT);
+ int topH = fbh>0 ? (fbh/2) : 0; int botH = fbh - topH; if(botH<1) botH=1; if(topH<1) topH=1;
+ if(texTY && tyW>0 && tyH>0){ glUseProgram(prog2); glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,texTY); glUniform1i(uTex,0); glViewport(0,botH,fbw,topH); float vpAspect=(fbw>0 && topH>0)?(float)fbw/(float)topH:1.0f; float imgAspect=(float)tyW/(float)tyH; float hh=1.0f; float hw=hh*(imgAspect/vpAspect); float verts[]={ -hw,-hh, 0,1,  hw,-hh, 1,1,  hw, hh, 1,0,  -hw, hh, 0,0 }; glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER,vbo); glBufferData(GL_ARRAY_BUFFER,sizeof(verts),verts,GL_DYNAMIC_DRAW); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)0); glEnableVertexAttribArray(0); glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)(2*sizeof(float))); glEnableVertexAttribArray(1); glDrawArrays(GL_TRIANGLE_FAN,0,4); }
+ if(!gifFrames.empty() && gifW>0 && gifH>0){ double now=glfwGetTime(); if(now>=nextAt){ frame=(frame+1)%gifFrames.size(); int d=gifDelays.empty()?100:gifDelays[frame]; nextAt=now+((d<=0)?0.1:d/1000.0); } glUseProgram(prog2); glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,gifFrames[frame]); glUniform1i(uTex,0); glViewport(0,0,fbw,botH); float vpAspect=(fbw>0 && botH>0)?(float)fbw/(float)botH:1.0f; float imgAspect=(float)gifW/(float)gifH; float hh=1.0f; float hw=hh*(imgAspect/vpAspect); float verts[]={ -hw,-hh, 0,1,  hw,-hh, 1,1,  hw, hh, 1,0,  -hw, hh, 0,0 }; glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER,vbo); glBufferData(GL_ARRAY_BUFFER,sizeof(verts),verts,GL_DYNAMIC_DRAW); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)0); glEnableVertexAttribArray(0); glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)(2*sizeof(float))); glEnableVertexAttribArray(1); glDrawArrays(GL_TRIANGLE_FAN,0,4); }
+ glfwSwapBuffers(win); if(glfwGetKey(win,GLFW_KEY_ESCAPE)==GLFW_PRESS) glfwSetWindowShouldClose(win,1); }
+ if(texTY) glDeleteTextures(1,&texTY); for(auto t:gifFrames) glDeleteTextures(1,&t); glDeleteVertexArrays(1,&vao); glDeleteBuffers(1,&vbo); glDeleteProgram(prog2); glfwMakeContextCurrent(returnWindow); glfwDestroyWindow(win); }
+}
+
 
 void Game::DrawHUD() {
     float topY = hudTop;
@@ -76,9 +126,31 @@ void Game::DrawHUD() {
     }
 
     for (int i=0;i<lives;i++) {
+        renderer.UseTexture(false);
         renderer.SetColor(1.0f, 0.3f, 0.3f, 1.0f);
-        renderer.SetOffset(0.8f + i*0.06f, hudTop);
-        renderer.DrawQuad(0.02f, 0.02f);
+        renderer.SetOffset(0.0f, 0.0f);
+        float cx = 0.8f + i*0.06f;
+        float cy = hudTop;
+        float r = 0.02f;
+        const int N = 24;
+        std::vector<float> verts; verts.reserve((N+2)*2);
+        verts.push_back(cx); verts.push_back(cy);
+        for(int k=0;k<=N;k++){
+            float ang = (float)k / (float)N * 6.28318530718f;
+            verts.push_back(cx + r * std::cos(ang));
+            verts.push_back(cy + r * std::sin(ang));
+        }
+        unsigned int vao=0, vbo=0;
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &vbo);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(float)*verts.size(), verts.data(), GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), (void*)0);
+        glEnableVertexAttribArray(0);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, N+2);
+        glDeleteVertexArrays(1, &vao);
+        glDeleteBuffers(1, &vbo);
     }
 }
 
@@ -102,6 +174,10 @@ Game::Game(int width, int height, const char* title)
     boomFrame = 0; boomNextAt = 0.0; showBoom = false; boomX = 0.0f; boomY = 0.0f;
     boom2Frame = 0; boom2NextAt = 0.0; showBoom2 = false; boom2X = 0.0f; boom2Y = 0.0f;
     brickFx.clear();
+    std::random_device rd; rng.seed(rd());
+    basePaddleW = paddle.GetW();
+    tripleUntil = 0.0; enlargeUntil = 0.0;
+    powerUps.clear(); extraBalls.clear();
     InitLevel();
     ResetBallOnPaddle();
 }
@@ -120,7 +196,7 @@ void Game::InitLevel() {
     float bh = bh_full * 0.5f * 0.8f;
     float y = top;
     float colors[6][3] = {
-        {1.0f, 0.2f, 0.2f},
+        {0.6f, 0.6f, 0.6f},
         {1.0f, 0.5f, 0.0f},
         {1.0f, 0.9f, 0.2f},
         {0.2f, 0.9f, 0.2f},
@@ -176,10 +252,8 @@ void Game::InitLevelAlien() {
             char ch = art[r][c];
             if (ch == '.') { x += cellW; continue; }
             Brick b; b.x = x; b.y = y; b.w = bw; b.h = bh; b.destroyed = false;
-            if (ch == 'g') { b.r=0.75f; b.g=0.75f; b.b=0.75f; b.points=150; }
-            else if (ch == 'y') { b.r=1.0f; b.g=0.9f; b.b=0.1f; b.points=200; }
-            else if (ch == 'r') { b.r=0.9f; b.g=0.1f; b.b=0.1f; b.points=250; }
-            else { b.r=0.6f; b.g=0.6f; b.b=0.6f; b.points=100; }
+            if (ch == 'r') { b.r=1.0f; b.g=0.2f; b.b=0.2f; b.points=250; }
+            else { b.r=1.0f; b.g=1.0f; b.b=1.0f; b.points= (ch=='y'?200:150); }
             bricks.push_back(b);
             x += cellW;
         }
@@ -200,60 +274,122 @@ bool Game::AllBricksCleared() const {
 }
 
 void Game::UpdatePlaying(float dt) {
-    ball.Update(dt);
-    float bx = ball.GetX();
-    float by = ball.GetY();
-    float br = ball.GetRadius();
-    float playTop = 0.9f;
-    float playBottom = paddle.GetY() - 0.08f;
-    if (by + br > playTop) { ball.SetY(playTop - br); ball.SetVY(-ball.GetVY()); }
-    if (by - br < playBottom) {
-        lives -= 1;
-        showDance = false;
-        danceUntil = 0.0;
-        if (lives > 0) { state = Serving; ResetBallOnPaddle(); }
-        else { state = GameOver; showSad = true; showDance = false; sadFrame = 0; double n = glfwGetTime(); sadNextAt = n + (sadDelaysMs.empty()?0.1: sadDelaysMs[0]/1000.0); showBoom = true; boomFrame = 0; boomX = paddle.GetX(); boomY = paddle.GetY(); boomNextAt = n + 0.08; showBoom2 = true; boom2Frame = 0; boom2X = bx; boom2Y = by; boom2NextAt = n + 0.08; }
-        return;
-    }
-    float px = paddle.GetX();
-    float py = paddle.GetY();
-    float pw = paddle.GetW();
-    float ph = paddle.GetH();
-    if (ball.GetVY() < 0.0f && by > py && by - br <= py + ph + 0.02f && bx >= px - pw - br && bx <= px + pw + br) {
-        float hitPos = (bx - px) / pw;
-        if (hitPos < -1.0f) hitPos = -1.0f;
-        if (hitPos > 1.0f) hitPos = 1.0f;
-        float speed = std::sqrt(ball.GetVX()*ball.GetVX() + ball.GetVY()*ball.GetVY());
-        if (speed < 0.6f) speed = 0.9f;
-        float minDeg = 25.0f * 3.1415926535f / 180.0f;
-        float maxDeg = 155.0f * 3.1415926535f / 180.0f;
-        float t = (hitPos + 1.0f) * 0.5f;
-        float theta = minDeg + t * (maxDeg - minDeg);
-        ball.SetVX(speed * std::cos(theta));
-        ball.SetVY(speed * std::sin(theta));
-        ball.SetY(py + ph + br + 0.003f);
-    }
-    for (auto& b : bricks) {
-        if (b.destroyed) continue;
-        float rcx = bx; if (bx < b.x - b.w) rcx = b.x - b.w; else if (bx > b.x + b.w) rcx = b.x + b.w;
-        float rcy = by; if (by < b.y - b.h) rcy = b.y - b.h; else if (by > b.y + b.h) rcy = b.y + b.h;
-        float rdx = bx - rcx; float rdy = by - rcy;
-        if (rdx*rdx + rdy*rdy <= br*br) {
-            b.destroyed = true;
-            score += 5;
-            if (std::fabs(rdx) > std::fabs(rdy)) ball.SetVX(-ball.GetVX()); else ball.SetVY(-ball.GetVY());
-            if (!danceFrames.empty()) { showDance = true; danceFrame = 0; double now = glfwGetTime(); danceNextAt = now + (danceDelaysMs.empty()?0.1: danceDelaysMs[0]/1000.0); danceUntil = now + 3.0; }
-            if (!starFrames.empty()) { Fx fx; fx.x = b.x; fx.y = b.y; fx.frame = 0; fx.nextAt = glfwGetTime() + (starDelaysMs.empty()?0.08: std::max(10, starDelaysMs[0])/1000.0); fx.alive = true; brickFx.push_back(fx); }
-            break;
+    bool mainFell = false;
+    float lastFallX = ball.GetX();
+    float lastFallY = ball.GetY();
+
+    auto processBall = [&](Ball& bb, bool isMain){
+        bb.Update(dt);
+        float bx = bb.GetX();
+        float by = bb.GetY();
+        float br = bb.GetRadius();
+        float playTop = 0.9f;
+        float playBottom = paddle.GetY() - 0.08f;
+        if (by + br > playTop) { bb.SetY(playTop - br); bb.SetVY(-bb.GetVY()); }
+        if (by - br < playBottom) {
+            if (isMain) mainFell = true;
+            lastFallX = bx; lastFallY = by;
+            return false;
+        }
+        float px = paddle.GetX(); float py = paddle.GetY(); float pw = paddle.GetW(); float ph = paddle.GetH();
+        if (bb.GetVY() < 0.0f && by > py && by - br <= py + ph + 0.02f && bx >= px - pw - br && bx <= px + pw + br) {
+            float hitPos = (bx - px) / pw;
+            if (hitPos < -1.0f) hitPos = -1.0f;
+            if (hitPos > 1.0f) hitPos = 1.0f;
+            float speed = std::sqrt(bb.GetVX()*bb.GetVX() + bb.GetVY()*bb.GetVY());
+            if (speed < 0.6f) speed = 0.9f;
+            float minDeg = 25.0f * 3.1415926535f / 180.0f;
+            float maxDeg = 155.0f * 3.1415926535f / 180.0f;
+            float t = (hitPos + 1.0f) * 0.5f;
+            float theta = minDeg + t * (maxDeg - minDeg);
+            bb.SetVX(speed * std::cos(theta));
+            bb.SetVY(speed * std::sin(theta));
+            bb.SetY(py + ph + br + 0.003f);
+        }
+        for (auto& b : bricks) {
+            if (b.destroyed) continue;
+            float rcx = bx; if (bx < b.x - b.w) rcx = b.x - b.w; else if (bx > b.x + b.w) rcx = b.x + b.w;
+            float rcy = by; if (by < b.y - b.h) rcy = b.y - b.h; else if (by > b.y + b.h) rcy = b.y + b.h;
+            float rdx = bx - rcx; float rdy = by - rcy;
+            if (rdx*rdx + rdy*rdy <= br*br) {
+                b.destroyed = true; score += 5;
+                if (std::fabs(rdx) > std::fabs(rdy)) bb.SetVX(-bb.GetVX()); else bb.SetVY(-bb.GetVY());
+                if (!danceFrames.empty()) { showDance = true; danceFrame = 0; double now = glfwGetTime(); danceNextAt = now + (danceDelaysMs.empty()?0.1: danceDelaysMs[0]/1000.0); danceUntil = now + 3.0; }
+                if (!starFrames.empty()) { Fx fx; fx.x = b.x; fx.y = b.y; fx.frame = 0; fx.nextAt = glfwGetTime() + (starDelaysMs.empty()?0.08: std::max(10, starDelaysMs[0])/1000.0); fx.alive = true; brickFx.push_back(fx); }
+                std::uniform_int_distribution<int> roll(0,99);
+                int v = roll(rng);
+                if (v < 10) { PowerUp pu; pu.x = b.x; pu.y = b.y; pu.vy = -0.25f; pu.type = (v < 5 ? 0 : 1); pu.alive = true; powerUps.push_back(pu); }
+                break;
+            }
+        }
+        return true;
+    };
+
+    bool mainAlive = processBall(ball, true);
+
+    for (size_t i=0; i<extraBalls.size();) {
+        if (!processBall(extraBalls[i], false)) {
+            extraBalls.erase(extraBalls.begin() + i);
+        } else {
+            ++i;
         }
     }
+
+    if (!mainAlive && !extraBalls.empty()) {
+        ball = extraBalls.front();
+        extraBalls.erase(extraBalls.begin());
+        mainAlive = true;
+    }
+
+    if (!mainAlive && extraBalls.empty()) {
+        lives -= 1;
+        showDance = false; danceUntil = 0.0;
+        double n = glfwGetTime();
+        if (lives > 0) {
+            state = Serving;
+            extraBalls.clear(); powerUps.clear(); tripleUntil = 0.0; enlargeUntil = 0.0; paddle.SetW(basePaddleW);
+            ResetBallOnPaddle();
+        } else {
+            state = GameOver;
+            showSad = true; showDance = false; sadFrame = 0; sadNextAt = n + (sadDelaysMs.empty()?0.1: sadDelaysMs[0]/1000.0);
+            showBoom = true; boomFrame = 0; boomX = paddle.GetX(); boomY = paddle.GetY(); boomNextAt = n + 0.08;
+            showBoom2 = true; boom2Frame = 0; boom2X = lastFallX; boom2Y = lastFallY; boom2NextAt = n + 0.08;
+        }
+        return;
+    }
+
+    double now = glfwGetTime();
+    if (tripleUntil>0.0 && now>tripleUntil) { extraBalls.clear(); tripleUntil=0.0; }
+    if (enlargeUntil>0.0 && now>enlargeUntil) { paddle.SetW(basePaddleW); enlargeUntil=0.0; }
+
+    for (auto& pu : powerUps) {
+        if (!pu.alive) continue;
+        pu.y += pu.vy * dt;
+        if (pu.y < -1.1f) { pu.alive = false; continue; }
+        float px = paddle.GetX(); float py = paddle.GetY(); float pw = paddle.GetW(); float ph = paddle.GetH();
+        if (pu.y <= py + ph*0.5f && pu.y >= py - ph*0.5f && pu.x >= px - pw && pu.x <= px + pw) {
+            pu.alive = false;
+            if (pu.type==0) {
+                Ball b1(ball.GetX(), ball.GetY(), ball.GetRadius());
+                Ball b2(ball.GetX(), ball.GetY(), ball.GetRadius());
+                b1.SetVX(ball.GetVX()*0.9f); b1.SetVY(ball.GetVY()*1.05f);
+                b2.SetVX(ball.GetVX()*1.05f); b2.SetVY(ball.GetVY()*0.9f);
+                extraBalls.clear(); extraBalls.push_back(b1); extraBalls.push_back(b2);
+                tripleUntil = now + 20.0;
+            } else {
+                paddle.SetW(basePaddleW * 1.6f);
+                enlargeUntil = now + 20.0;
+            }
+        }
+    }
+    powerUps.erase(std::remove_if(powerUps.begin(), powerUps.end(), [](const PowerUp& p){return !p.alive;}), powerUps.end());
+
     if (AllBricksCleared()) { state = Win; showSad = false; showDance = true; if (!danceFrames.empty()) { danceFrame = 0; double now2 = glfwGetTime(); danceNextAt = now2 + (danceDelaysMs.empty()?0.1: danceDelaysMs[0]/1000.0); } }
 }
 
 void Game::DrawScene() {
     for (auto& b : bricks) {
         if (b.destroyed) continue;
-        renderer.UseTexture(false);
         renderer.SetColor(b.r, b.g, b.b, 1.0f);
         renderer.SetOffset(b.x, b.y);
         renderer.DrawQuad(b.w, b.h);
@@ -261,6 +397,13 @@ void Game::DrawScene() {
     if (!(state == GameOver)) {
         paddle.Draw(renderer);
         ball.Draw(renderer);
+        for (auto& eb : extraBalls) eb.Draw(renderer);
+        for (auto& pu : powerUps) {
+            renderer.UseTexture(false);
+            if (pu.type==0) renderer.SetColor(0.2f, 0.6f, 1.0f, 1.0f); else renderer.SetColor(0.2f, 1.0f, 0.4f, 1.0f);
+            renderer.SetOffset(pu.x, pu.y);
+            renderer.DrawQuad(0.03f, 0.03f);
+        }
     }
     DrawHUD();
     double now = glfwGetTime();
@@ -394,6 +537,12 @@ void Game::ProcessInput() {
         ResetBallOnPaddle();
     }
     prevH = h;
+    static bool prevO = false;
+    bool o = renderer.IsKeyPressed(GLFW_KEY_O);
+    if (o && !prevO) {
+        ShowThankWindow(renderer.GetWindow());
+    }
+    prevO = o;
     bool space = renderer.IsKeyPressed(GLFW_KEY_SPACE);
     if (state == Serving && space && !prevSpace) {
         ball.SetVX(0.0f);

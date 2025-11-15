@@ -23,6 +23,7 @@ public:
     void DrawQuadUV(float hw, float hh, float u0, float v0, float u1, float v1);
     unsigned int LoadTextureFromFile(const char* path);
     void LoadGifFrames(const char* path, std::vector<unsigned int>& textures, std::vector<int>& delaysMs, int& width, int& height);
+    GLFWwindow* GetWindow() { return window; }
 private:
     GLFWwindow* window;
     unsigned int shaderProgram;
