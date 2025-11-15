@@ -21,7 +21,7 @@ Build and Run
 Open the MSYS2 MinGW64 terminal.
 Navigate to the project source directory:
 ```bash
-cd /c/Users/USER/Projectname/src
+cd /c/Users/USER/ArcanoidGameWithTransparencyImplementationC
 make
 ./ArcanoidTheGame.exe
 ```
